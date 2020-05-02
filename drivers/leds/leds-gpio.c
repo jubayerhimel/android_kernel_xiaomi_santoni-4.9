@@ -10,6 +10,14 @@
  * published by the Free Software Foundation.
  *
  */
+#include <linux/init.h>
+#include <linux/hrtimer.h>
+#include <linux/of_platform.h>
+#include <linux/of_gpio.h>
+#include <linux/workqueue.h>
+#include <linux/pinctrl/consumer.h>
+#include <linux/pm_qos.h>
+#include <linux/delay.h>
 #include <linux/err.h>
 #include <linux/gpio.h>
 #include <linux/gpio/consumer.h>
@@ -21,6 +29,31 @@
 #include <linux/property.h>
 #include <linux/slab.h>
 #include <linux/regulator/consumer.h>
+
+#define DUTY_CLCLE 50
+#define ADJUST_NUM 15
+#define JUSTTIMES 6
+#define JUST_DELAY 6
+#define HRTIME_JUST_DELAY 9000
+
+static s64 dealt = 0;
+static DEFINE_SPINLOCK(infrared_lock);
+struct pm_qos_request infrared_qos_req;
+struct mutex ir_lock;
+
+struct gpio_ir_tx_packet {
+	struct completion done;
+	struct hrtimer    timer;
+	struct gpio_desc *gpiod;
+	bool              high_active;
+	u32               pulse;
+	u32               space;
+	unsigned int     *buffer;
+	unsigned int      length;
+	unsigned int      next;
+	bool              on;
+	bool               abort;
+};
 
 struct gpio_led_data {
 	struct led_classdev cdev;
@@ -40,7 +73,8 @@ static void gpio_led_set(struct led_classdev *led_cdev,
 	enum led_brightness value)
 {
 	struct gpio_led_data *led_dat = cdev_to_gpio_led_data(led_cdev);
-	int level;
+	int level, ret = 0;
+	printk("infr has been start");
 
 	if (value == LED_OFF)
 		level = 0;
@@ -52,12 +86,172 @@ static void gpio_led_set(struct led_classdev *led_cdev,
 						 NULL, NULL);
 		led_dat->blinking = 0;
 	} else {
-		if (led_dat->can_sleep)
-			gpiod_set_value_cansleep(led_dat->gpiod, level);
-		else
-			gpiod_set_value(led_dat->gpiod, level);
+		ret = gpiod_direction_output(led_dat->gpiod, level);
 	}
 }
+
+static void gpio_ir_tx_set(struct gpio_ir_tx_packet *gpkt, bool on)
+{
+	if (gpkt->high_active)
+		gpiod_set_value(gpkt->gpiod, on);
+	else
+		gpiod_set_value(gpkt->gpiod, !on);
+}
+
+static s64 time_adjust(struct gpio_ir_tx_packet *gpkt)
+{
+	s64 now;
+	int i;
+	unsigned long flags;
+
+	spin_lock_irqsave(&infrared_lock, flags);
+
+	now = ktime_to_us(ktime_get());
+	for (i = 0; i < ADJUST_NUM; i++)  {
+		gpio_ir_tx_set(gpkt, false);
+	}
+	spin_unlock_irqrestore(&infrared_lock, flags);
+
+	return (ktime_to_us(ktime_get())-now)/ADJUST_NUM;
+}
+
+static long pwm_ir_tx_work(void *arg)
+{
+	struct gpio_ir_tx_packet *gpkt = arg;
+	unsigned long flags;
+
+
+	spin_lock_irqsave(&infrared_lock, flags);
+	for (; gpkt->next < gpkt->length; gpkt->next++) {
+
+
+		if (gpkt->next & 0x01) {
+			gpio_ir_tx_set(gpkt, false);
+			if (gpkt->buffer[gpkt->next] >= dealt)
+				udelay(gpkt->buffer[gpkt->next] - dealt);
+		} else if (!gpkt->pulse || !gpkt->space) {
+			gpio_ir_tx_set(gpkt, true);
+			if (gpkt->buffer[gpkt->next] >= dealt)
+				udelay(gpkt->buffer[gpkt->next] - dealt);
+		} else {
+			while (gpkt->buffer[gpkt->next]) {
+				unsigned int usecs;
+				usecs = gpkt->on ? gpkt->pulse : gpkt->space;
+				usecs = min(usecs, gpkt->buffer[gpkt->next]);
+
+				gpio_ir_tx_set(gpkt, gpkt->on);
+
+				if (usecs >= dealt)
+					udelay(usecs - dealt);
+
+				gpkt->buffer[gpkt->next] -= usecs;
+				gpkt->on = !gpkt->on;
+			}
+		}
+	}
+
+	gpio_ir_tx_set(gpkt, false);
+
+	spin_unlock_irqrestore(&infrared_lock, flags);
+
+	return gpkt->next ? : -ERESTARTSYS;
+}
+
+static int gpio_ir_tx_transmit_with_delay(struct gpio_ir_tx_packet *gpkt)
+{
+
+
+	int cpu, rc = -ENODEV;
+	int try_again = JUSTTIMES;
+
+	dealt = time_adjust(gpkt);
+
+	while (try_again && (dealt > JUST_DELAY)) {
+		try_again--;
+		dealt = time_adjust(gpkt);
+		printk("jeft time_adjust again!! dealt=%lld\n", dealt);
+	}
+
+	if (dealt > JUST_DELAY)
+		goto out;
+
+
+
+
+
+	for_each_online_cpu(cpu) {
+
+		if (cpu != 0) {
+			rc = work_on_cpu(cpu, pwm_ir_tx_work, gpkt);
+			break;
+		}
+	}
+
+	if (rc == -ENODEV) {
+		pr_warn("pwm-ir: can't ron on the auxilliary cpu\n");
+
+	}
+
+	return rc;
+
+out:
+	printk("jeft cpu too low infrared send fail dealt =%lld\n", dealt);
+	return rc;
+}
+
+static ssize_t transmit_show(struct device *dev,
+		struct device_attribute *attr, char *buf)
+{
+	struct led_classdev *led_cdev = dev_get_drvdata(dev);
+
+	return sprintf(buf, "%d\n", led_cdev->brightness);
+}
+
+static ssize_t transmit_store(struct device *dev,
+		struct device_attribute *attr,
+		const char *buf, size_t count)
+{
+	int *temp_buf = (int*)buf;
+	int rc = 0;
+	u32 carrier, period;
+
+	struct gpio_ir_tx_packet gpkt = {};
+	struct led_classdev *led_cdev = dev_get_drvdata(dev);
+	struct gpio_led_data *led_dat =
+			container_of(led_cdev, struct gpio_led_data, cdev);
+
+
+	mutex_lock(&ir_lock);
+
+	carrier = temp_buf[0];
+	period = NSEC_PER_MSEC / carrier;
+
+	gpkt.pulse = period * DUTY_CLCLE / 100;
+	gpkt.space = period - gpkt.pulse;
+
+	gpkt.gpiod	 = led_dat->gpiod;
+	gpkt.high_active = 1;
+	gpkt.buffer 	 = (unsigned int *)&temp_buf[1];
+	gpkt.length 	 = ((int)count/4 - 1);
+
+	pm_qos_update_request(&infrared_qos_req, 1);
+#if defined(USE_HRTIMER_SIMULATION)
+	rc = gpio_ir_tx_transmit_with_timer(&gpkt);
+#else
+	if (gpkt.high_active)  {
+		gpiod_direction_output(gpkt.gpiod, 0);
+	}
+	rc = gpio_ir_tx_transmit_with_delay(&gpkt);
+#endif
+	pm_qos_update_request(&infrared_qos_req, PM_QOS_DEFAULT_VALUE);
+
+
+	mutex_unlock(&ir_lock);
+
+	return rc;
+}
+static DEVICE_ATTR(transmit, 0664, transmit_show, transmit_store);
+
 
 static int gpio_led_set_blocking(struct led_classdev *led_cdev,
 	enum led_brightness value)
@@ -140,6 +334,10 @@ static int create_gpio_led(const struct gpio_led *template,
 	if (ret < 0)
 		return ret;
 
+	if (strcmp(led_dat->cdev.name, "infrared") == 0) {
+		device_create_file(led_dat->cdev.dev, &dev_attr_transmit);
+	}
+
 	return devm_led_classdev_register(parent, &led_dat->cdev);
 }
 
@@ -202,8 +400,7 @@ static struct gpio_leds_priv *gpio_leds_create(struct platform_device *pdev)
 				led.default_state = LEDS_GPIO_DEFSTATE_OFF;
 		}
 
-		if (fwnode_property_present(child, "retain-state-suspended"))
-			led.retain_state_suspended = 1;
+		led.retain_state_suspended = 1;
 		if (fwnode_property_present(child, "panic-indicator"))
 			led.panic_indicator = 1;
 
@@ -245,8 +442,6 @@ static const struct of_device_id of_gpio_leds_match[] = {
 	{},
 };
 
-MODULE_DEVICE_TABLE(of, of_gpio_leds_match);
-
 static int gpio_led_probe(struct platform_device *pdev)
 {
 	struct gpio_led_platform_data *pdata = dev_get_platdata(&pdev->dev);
@@ -274,7 +469,9 @@ static int gpio_led_probe(struct platform_device *pdev)
 	}
 
 	platform_set_drvdata(pdev, priv);
-
+	pm_qos_add_request(&infrared_qos_req,
+			PM_QOS_CPU_DMA_LATENCY, PM_QOS_DEFAULT_VALUE);
+	mutex_init(&ir_lock);
 	return 0;
 }
 
@@ -288,6 +485,8 @@ static void gpio_led_shutdown(struct platform_device *pdev)
 
 		gpio_led_set(&led->cdev, LED_OFF);
 	}
+	platform_set_drvdata(pdev, NULL);
+	pm_qos_remove_request(&infrared_qos_req);
 }
 
 static int gpio_led_suspend(struct platform_device *pdev, pm_message_t message)
