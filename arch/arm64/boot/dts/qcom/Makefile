@@ -634,6 +634,8 @@ dtb-$(CONFIG_ARCH_SDM429) += sdm429-mtp.dtb \
 
 endif
 
+dtb-$(CONFIG_MACH_XIAOMI_SANTONI) := santoni-bleed.dtb
+
 always		:= $(dtb-y)
 subdir-y	:= $(dts-dirs)
 clean-files	:= *.dtb
