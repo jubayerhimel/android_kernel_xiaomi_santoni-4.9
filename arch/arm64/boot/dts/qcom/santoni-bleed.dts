@@ -10402,7 +10402,7 @@
 			qcom,smmu-version = <0x2>;
 			qcom,smmu-enabled;
 			iommus = <0x6e 0x2001 0x0>;
-			qcom,smmu-sid = <0x0 0x1>;
+			qcom,smmu-sid-mask = <0x0 0x1>;
 		};
 
 		qcom,msm-adsp-loader {
