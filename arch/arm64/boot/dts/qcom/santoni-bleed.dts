@@ -2511,6 +2511,7 @@
 			compatible = "iommu-debug-test";
 			iommus = <0x26 0x0>;
 		};
+
 		qcom,iommu@1e00000 {
 			status = "okay";
 			compatible = "qcom,qsmmu-v500";
@@ -3887,7 +3888,7 @@
 			non_secure_cb {
 				compatible = "qcom,msm-vidc,context-bank";
 				label = "venus_ns";
-            	iommus = <0x6e 0x800 0x0 0x6e 0x807 0x0 0x6e 0x808 0x27 0x6e 0x811 0x20>;
+				iommus = <0x6e 0x800 0x0 0x6e 0x807 0x0 0x6e 0x808 0x27 0x6e 0x811 0x20>;
 				buffer-types = <0xfff>;
 				virtual-addr-pool = <0x5dc00000 0x7f000000 0xdcc00000 0x1000000>;
 			};
@@ -3895,7 +3896,7 @@
 			secure_bitstream_cb {
 				compatible = "qcom,msm-vidc,context-bank";
 				label = "venus_sec_bitstream";
-            	iommus = <0x6e 0x900 0x0 0x6e 0x90a 0x4 0x6e 0x909 0x22>;
+				iommus = <0x6e 0x900 0x0 0x6e 0x90a 0x4 0x6e 0x909 0x22>;
 				buffer-types = <0x241>;
 				virtual-addr-pool = <0x4b000000 0x12c00000>;
 				qcom,secure-context-bank;
@@ -3904,7 +3905,7 @@
 			secure_pixel_cb {
 				compatible = "qcom,msm-vidc,context-bank";
 				label = "venus_sec_pixel";
-            	iommus = <0x6e 0x90c 0x20>;
+				iommus = <0x6e 0x90c 0x20>;
 				buffer-types = <0x106>;
 				virtual-addr-pool = <0x25800000 0x25800000>;
 				qcom,secure-context-bank;
@@ -3913,7 +3914,7 @@
 			secure_non_pixel_cb {
 				compatible = "qcom,msm-vidc,context-bank";
 				label = "venus_sec_non_pixel";
-	            iommus = <0x6e 0x940 0x0 0x6e 0x907 0x8 0x6e 0x908 0x20 0x6e 0x90d 0x20>;
+				iommus = <0x6e 0x940 0x0 0x6e 0x907 0x8 0x6e 0x908 0x20 0x6e 0x90d 0x20>;
 				buffer-types = <0x480>;
 				virtual-addr-pool = <0x1000000 0x24800000>;
 				qcom,secure-context-bank;
@@ -4549,7 +4550,7 @@
 
 			qcom,smmu_mdp_sec_cb {
 				compatible = "qcom,smmu_mdp_sec";
-	            iommus = <0x6e 0x2801 0x0>;
+				iommus = <0x6e 0x2801 0x0>;
 			};
 
 			qcom,mdss_fb_primary {
@@ -9496,7 +9497,7 @@
 			qcom,msm_fastrpc_compute_cb {
 				compatible = "qcom,msm-fastrpc-legacy-compute-cb";
 				label = "adsprpc-smd";
-	            iommus = <0x6e 0x2008 0x7>;
+				iommus = <0x6e 0x2008 0x7>;
 				sids = <0x8 0x9 0xa 0xb 0xc 0xd 0xe 0xf>;
 				qcom,virtual-addr-pool = <0x80000000 0x7fffffff>;
 			};
@@ -10924,27 +10925,27 @@
 			compatible = "qcom,msm-cam-smmu";
 
 			msm_cam_smmu_cb1 {
-            compatible = "qcom,msm-cam-smmu-cb";
-            iommus = <0x6e 0x400 0x0 0x6e 0x2400 0x0>;
+				compatible = "qcom,msm-cam-smmu-cb";
+				iommus = <0x6e 0x400 0x0 0x6e 0x2400 0x0>;
 				label = "vfe";
 				qcom,scratch-buf-support;
 			};
 
 			msm_cam_smmu_cb2 {
-            compatible = "qcom,msm-cam-smmu-cb";
+				compatible = "qcom,msm-cam-smmu-cb";
 				label = "vfe_secure";
 				qcom,secure-context;
 			};
 
 			msm_cam_smmu_cb3 {
-            compatible = "qcom,msm-cam-smmu-cb";
-            iommus = <0x6e 0x1c00 0x0>;
+				compatible = "qcom,msm-cam-smmu-cb";
+				iommus = <0x6e 0x1c00 0x0>;
 				label = "cpp";
 			};
 
 			msm_cam_smmu_cb4 {
-            compatible = "qcom,msm-cam-smmu-cb";
-            iommus = <0x6e 0x1800 0x0>;
+				compatible = "qcom,msm-cam-smmu-cb";
+				iommus = <0x6e 0x1800 0x0>;
 				label = "jpeg_enc0";
 			};
 		};
